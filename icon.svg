@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<rect width="200" height="200" rx="40" fill="#23231F"/>
+<text x="100" y="92" font-family="monospace" font-size="56" font-weight="600" fill="#345A8C" text-anchor="middle">DE</text>
+<text x="100" y="150" font-family="monospace" font-size="56" font-weight="600" fill="#A6402F" text-anchor="middle">ES</text>
+</svg>
