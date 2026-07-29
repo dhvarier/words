@@ -287,6 +287,9 @@
     <button class="abtn ghost" id="dataOut">Export data</button>
     <button class="abtn ghost" id="dataIn">Import data</button>
     <input type="file" id="dataFile" accept=".json" style="display:none">
+    <button class="abtn ghost" id="ghSync" style="border-color:#2E5B33;color:#2E5B33">☁ Sync to GitHub</button>
+    <button class="abtn ghost" id="ghRestore" style="border-color:#2E5B33;color:#2E5B33">☁ Restore from GitHub</button>
+    <button class="abtn ghost" id="ghSetup" style="font-size:10px">GitHub backup settings</button>
   </div>
 
   <div class="stack" id="stack"></div>
@@ -355,7 +358,22 @@ async function load(){
     const bk=await loadBackup();
     if(bk&&bk.length){
       cards=bk;
-      notify(`Recovered ${bk.length} card(s) from backup — your data store looked empty`);
+      notify(`Recovered ${bk.length} card(s) from local backup — your data store looked empty`);
+    }else{
+      const c=ghConfig();
+      if(c.owner&&c.token){
+        try{
+          const res=await ghRequest("vocab-backup.json","GET");
+          if(res&&res.ok){
+            const j=await res.json();
+            const remote=JSON.parse(b64decode(j.content));
+            if(Array.isArray(remote)&&remote.length){
+              cards=remote;
+              notify(`Recovered ${remote.length} card(s) from your GitHub backup — local storage was empty`);
+            }
+          }
+        }catch(e){}
+      }
     }
   }
   cards.forEach(c=>{if(typeof c.stars!=="number")c.stars=0;});
@@ -364,7 +382,14 @@ async function load(){
 async function save(){
   const ok=await store.set(JSON.stringify(cards));
   if(!ok)notify("Save failed");
-  if(cards.length>0)saveBackup();
+  if(cards.length>0){saveBackup();scheduleGhAutoSync();}
+}
+let ghAutoTimer=null;
+function scheduleGhAutoSync(){
+  const c=ghConfig();
+  if(!c.owner||!c.token)return; // not configured, skip silently
+  clearTimeout(ghAutoTimer);
+  ghAutoTimer=setTimeout(()=>{$("#ghSync")&&$("#ghSync").click();},20000);
 }
 const BKEY="vocab:cards:backup";
 async function saveBackup(){
@@ -1008,7 +1033,97 @@ function dl(content,name,type){
   a.href=URL.createObjectURL(blob);a.download=name;a.click();
 }
 
-let toastT;
+/* ---------------- GitHub backup (survives any local/device data loss) ---------------- */
+function ghConfig(){
+  let c={};
+  try{c=JSON.parse(localStorage.getItem("vocab:ghconfig")||"{}");}catch(e){}
+  return c;
+}
+function saveGhConfig(c){
+  try{localStorage.setItem("vocab:ghconfig",JSON.stringify(c));}catch(e){}
+}
+$("#ghSetup").onclick=()=>{
+  const cur=ghConfig();
+  const owner=prompt("GitHub username:",cur.owner||"");
+  if(owner===null)return;
+  const repo=prompt("Repo name (e.g. words):",cur.repo||"words");
+  if(repo===null)return;
+  const token=prompt("Personal access token (from github.com/settings/tokens, needs 'repo' scope — this stays only on this device):",cur.token||"");
+  if(token===null)return;
+  saveGhConfig({owner:owner.trim(),repo:repo.trim(),token:token.trim()});
+  notify("GitHub backup configured");
+};
+
+async function ghRequest(path,method,body){
+  const c=ghConfig();
+  if(!c.owner||!c.repo||!c.token){notify("Set up GitHub backup first (button below)");return null;}
+  const url=`https://api.github.com/repos/${c.owner}/${c.repo}/contents/${path}`;
+  const res=await fetch(url,{
+    method:method||"GET",
+    headers:{
+      "Authorization":"Bearer "+c.token,
+      "Accept":"application/vnd.github+json"
+    },
+    body: body?JSON.stringify(body):undefined
+  });
+  return res;
+}
+function b64encode(str){
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function b64decode(str){
+  return decodeURIComponent(escape(atob(str)));
+}
+
+$("#ghSync").onclick=async()=>{
+  if(!cards.length){notify("Nothing to sync yet");return;}
+  notify("Syncing to GitHub…");
+  try{
+    // check if the backup file already exists, to get its sha (required to update)
+    let sha=null;
+    const getRes=await ghRequest("vocab-backup.json","GET");
+    if(getRes&&getRes.ok){
+      const j=await getRes.json();
+      sha=j.sha;
+    }
+    const content=b64encode(JSON.stringify(cards,null,1));
+    const putRes=await ghRequest("vocab-backup.json","PUT",{
+      message:"vocab backup — "+new Date().toISOString(),
+      content,
+      sha: sha||undefined
+    });
+    if(putRes&&putRes.ok){
+      try{localStorage.setItem("vocab:lastexport",String(Date.now()));}catch(e){}
+      updateExportReminder();
+      notify(`Synced ${cards.length} card(s) to GitHub`);
+    }else{
+      const err=putRes?await putRes.json().catch(()=>({})):{};
+      notify("Sync failed: "+(err.message||putRes?.status||"check token/repo"));
+    }
+  }catch(e){notify("Sync failed — network or config error");}
+};
+
+$("#ghRestore").onclick=async()=>{
+  if(cards.length && !confirm(`You currently have ${cards.length} card(s) here. Restoring will merge in whatever's on GitHub. Continue?`))return;
+  notify("Fetching from GitHub…");
+  try{
+    const res=await ghRequest("vocab-backup.json","GET");
+    if(!res||!res.ok){notify("No backup found on GitHub yet, or check your settings");return;}
+    const j=await res.json();
+    const incoming=JSON.parse(b64decode(j.content));
+    if(!Array.isArray(incoming))throw new Error("bad backup format");
+    const byId=new Map(cards.map(c=>[c.id,c]));
+    let added=0,merged=0;
+    for(const inc of incoming){
+      const ex=byId.get(inc.id);
+      if(!ex){cards.push(inc);added++;}
+      else{if((inc.stars||0)>(ex.stars||0))ex.stars=inc.stars;merged++;}
+    }
+    cards.sort((a,b)=>b.created-a.created);
+    await save();render();
+    notify(`Restored: ${added} new, ${merged} merged`);
+  }catch(e){notify("Restore failed: "+e.message);}
+};
 function notify(m){toast.textContent=m;toast.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>toast.classList.remove("show"),2200);}
 
 load();
@@ -1028,8 +1143,9 @@ function updateNetBanner(){
 window.addEventListener("online",()=>{
   updateNetBanner();
   const stuck=cards.filter(c=>c.status==="error"&&/unreachable|network|fetch|HTTP 0/i.test(c.errmsg||""));
-  stuck.forEach(c=>{c.status="pending";queue.push(c);});
-  if(stuck.length){render();pump();notify("Back online — retrying "+stuck.length+" translation(s)");}
+  if(stuck.length){
+    notify("Back online — "+stuck.length+" translation(s) failed earlier. Tap retry on each card when ready.");
+  }
 });
 window.addEventListener("offline",updateNetBanner);
 updateNetBanner();
