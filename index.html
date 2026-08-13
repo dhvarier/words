@@ -110,7 +110,15 @@
   .example{margin-top:8px;padding-top:8px;border-top:1px dashed var(--hair);font-size:15.5px;font-style:italic;color:#3A3A34}
   .example .en{font-style:normal;color:var(--muted);font-size:14px;display:block;margin-top:2px}
   .note{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);margin-top:7px}
-  .starrow{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--star);margin-top:7px;letter-spacing:.05em}
+  .starrow{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--star);margin-top:7px;letter-spacing:.05em;display:flex;align-items:center;gap:8px}
+  .starbtn{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:20px;height:20px;border:1px solid var(--hair);border-radius:4px;
+    background:var(--card);color:var(--muted);cursor:pointer;font-weight:600;
+    user-select:none;
+  }
+  .starbtn:active{background:var(--star);color:#fff;border-color:var(--star)}
+  .starreset{color:var(--muted);text-decoration:underline;cursor:pointer;font-size:11px}
   .spin{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted)}
   .errmsg{color:#B23;font-family:"IBM Plex Mono",monospace;font-size:12px}
   .errmsg .retry{color:var(--ink);text-decoration:underline;cursor:pointer;margin-left:8px}
@@ -608,6 +616,18 @@ function editTranslation(id,el){
   if(v!==c.translation){c.translation=v;if(c.status==="error")c.status="done";save();notify("Saved");}
 }
 function del(id){cards=cards.filter(x=>x.id!==id);save();render();}
+function adjustStars(id,delta){
+  const c=cards.find(x=>x.id===id);if(!c)return;
+  c.stars=Math.max(0,Math.round(((c.stars||0)+delta)*2)/2);
+  if(c.stars>0&&(c.attempts||0)===0)c.attempts=1; // keep the "tested" status consistent
+  save();render();
+}
+function resetStars(id){
+  const c=cards.find(x=>x.id===id);if(!c)return;
+  c.stars=0;
+  save();render();
+  notify("Stars reset");
+}
 
 /* ---------------- filtering ---------------- */
 document.querySelectorAll(".chip").forEach(ch=>{
@@ -674,9 +694,14 @@ function render(){
       const hw=formatHead(c.headword||c.word,c.lang);
       const ex=c.example?`<div class="example">${esc(c.example)}<span class="en">${esc(c.example_en||'')}</span></div>`:'';
       const note=c.note?`<div class="note">${esc(c.note)}</div>`:'';
-      const st = (c.attempts||0)===0
-        ? `<div class="starrow" style="color:var(--muted)">◌ not yet drilled</div>`
-        : (c.stars ? `<div class="starrow">${starStr(c.stars)}</div>` : `<div class="starrow" style="color:#2E5B33">✓ clean (${c.attempts} attempt${c.attempts===1?'':'s'})</div>`);
+      const label = (c.attempts||0)===0
+        ? `<span style="color:var(--muted)">◌ not yet drilled</span>`
+        : (c.stars ? starStr(c.stars) : `<span style="color:#2E5B33">✓ clean (${c.attempts} attempt${c.attempts===1?'':'s'})</span>`);
+      const st = `<div class="starrow">${label}
+        <span class="starbtn" onclick="adjustStars('${c.id}',-1)" title="remove a star">−</span>
+        <span class="starbtn" onclick="adjustStars('${c.id}',1)" title="add a star">+</span>
+        ${c.stars?`<span class="starreset" onclick="resetStars('${c.id}')">reset</span>`:''}
+      </div>`;
       const enrich=(c.basic&&canTranslate())?`<div class="note"><span class="retry" style="color:var(--ink);text-decoration:underline;cursor:pointer" onclick="retry('${c.id}')">✦ enrich (add example &amp; grammar)</span></div>`:(c.basic?`<div class="note">basic dictionary translation — open in Claude or add a key to enrich</div>`:'');
       body=`<div class="word">${hw}</div>
       <div class="translation" contenteditable spellcheck="false" onblur="editTranslation('${c.id}',this)" ondblclick="this.focus()">${esc(c.translation||'—')}</div>${ex}${note}${enrich}${st}`;
@@ -698,13 +723,6 @@ let dq=[], di=0, dFlipped=false, dWrong=[], dRightCt=0, dRound=1, dMode="flip";
 function startDrill(mode){
   let pool=visibleCards().filter(c=>c.status==="done");
   if(!pool.length)return;
-  const f=$("#starFilter").value;
-  if(["1","2","3","x2","x3"].includes(f)){
-    const zeros=cards.filter(c=>c.status==="done"&&(c.stars||0)===0&&(langFilter==="all"||c.lang===langFilter));
-    const n=Math.max(1,Math.round(pool.length*0.15));
-    shuffle(zeros);
-    pool=pool.concat(zeros.slice(0,n));
-  }
   dMode=mode;
   dq=shuffle([...pool]); di=0; dWrong=[]; dRightCt=0; dRound=1;
   $("#drill").classList.add("on");
