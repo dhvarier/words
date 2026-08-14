@@ -578,12 +578,17 @@ async function translate(card){
     await save();render();return;
   }
   const prompt=
-`You are a bilingual dictionary. Reply with ONLY a valid JSON object, no markdown, no backticks, no explanation.
+`You are a precise bilingual dictionary for a ${src} vocabulary app. Reply with ONLY a valid JSON object, no markdown, no backticks, no explanation.
 
-${src} word or phrase: "${card.word}"
+Input, given by the user: "${card.word}"
+
+This input could be written in EITHER ${src} OR English — detect which. Then:
+- If it's already ${src}, use it (or its correct dictionary form) as the headword.
+- If it's English, translate it INTO the correct, authentic ${src} word — never invent an anglicized spelling or loanword (e.g. do not turn "stroller" into "der Stroller" — the real word is "der Kinderwagen"). Only use a borrowed English-looking word if it is genuinely the standard, real ${src} term.
+If the input doesn't clearly correspond to a real word or phrase in either language, do your best but keep the translation honest rather than guessing confidently.
 
 JSON shape:
-{"headword":"dictionary form${card.lang==="de"?", nouns with der/die/das article":", nouns with el/la article"}","translation":"concise English meaning(s), comma-separated","example":"one short natural ${src} sentence using it, intermediate level","example_en":"English translation of that sentence","note":"${card.lang==="de"?"plural for nouns, or 'irreg.' for strong verbs, else empty string":"gender or 'irreg.' if useful, else empty string"}"}`;
+{"headword":"the correct ${src} dictionary form${card.lang==="de"?", nouns with der/die/das article":", nouns with el/la article"}","translation":"concise English meaning(s), comma-separated","example":"one short natural ${src} sentence using the headword, intermediate level","example_en":"English translation of that sentence","note":"${card.lang==="de"?"plural for nouns, or 'irreg.' for strong verbs, else empty string":"gender or 'irreg.' if useful, else empty string"}"}`;
   try{
     const obj=await callAPI(prompt,0);
     Object.assign(card,{status:"done",headword:obj.headword||card.word,translation:obj.translation||"",example:obj.example||"",example_en:obj.example_en||"",note:obj.note||"",basic:false});
